@@ -84,7 +84,6 @@
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
-    const demo = params.get('demo') === '1';
     const headers = token ? { 'x-usernode-token': token } : {};
 
     const card = document.getElementById('card');
@@ -158,16 +157,22 @@
     }
 
     async function register(state) {
+      if (!window.usernode || typeof window.usernode.sendTransaction !== 'function') {
+        // No bridge available — the backend verifies the transfer on-chain
+        // (staging and production alike), so without the wallet bridge there's
+        // no way to send the burn. Surface a clear message instead of POSTing.
+        setStatus('Wallet bridge unavailable — open this app inside Usernode to register.', true);
+        return;
+      }
       setBtnDisabled(true, 'Sending…');
       setStatus('Opening your wallet…');
       let txHash = null;
       try {
-        if (window.usernode && typeof window.usernode.sendTransaction === 'function') {
-          const result = await window.usernode.sendTransaction(state.burnAddress, 1, REGISTER_MEMO);
-          txHash = extractTxId(result);
-        }
-        // In staging there may be no real bridge/chain; the backend registers
-        // without an on-chain proof, so a missing txHash is fine there.
+        // Burn 1 Usernode token to the burn address with the register memo.
+        // The bridge polls /explorer-api for inclusion and resolves with the tx.
+        const result = await window.usernode.sendTransaction(state.burnAddress, 1, REGISTER_MEMO);
+        txHash = extractTxId(result);
+        // The backend re-verifies this transfer on-chain before granting tokens.
         setStatus('Waiting for confirmation…');
         setBtnDisabled(true, 'Confirming…');
         const res = await fetch('/api/register/confirm', {
@@ -194,7 +199,7 @@
 
     async function load() {
       try {
-        const res = await fetch('/api/me' + (demo ? '?demo=1' : ''), { headers });
+        const res = await fetch('/api/me', { headers });
         if (!res.ok) {
           card.innerHTML = '<p class="text-center text-zinc-500 text-sm py-6">Sign in through Usernode to register.</p>';
           return;

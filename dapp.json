@@ -16,9 +16,9 @@
       "expectSelector": "#card"
     },
     {
-      "name": "Registered state renders",
-      "path": "/?demo=1",
-      "expectText": "1,000"
+      "name": "Unregistered Register screen renders",
+      "path": "/",
+      "expectText": "Register to start trading"
     },
     {
       "name": "Health check",

@@ -189,20 +189,6 @@ async function insertRegistration({ userId, username, pubkey, txHash, memo, amou
 // Current user's registration status + balance.
 app.get('/api/me', async (req, res) => {
   try {
-    // Staging-only read-only demo state so the registered view is viewable
-    // on demand without any DB writes or a real on-chain transfer.
-    if (IS_STAGING && req.query.demo === '1') {
-      return res.json({
-        registered: true,
-        balance: STARTING_BALANCE,
-        username: req.user.username,
-        usernode_pubkey: req.user.usernode_pubkey || 'ut1demo000000000000000000000000000000000000000000demo',
-        burnAddress: BURN_ADDRESS,
-        staging: true,
-        demo: true,
-      });
-    }
-
     const reg = await getRegistration(req.user.id);
     res.json({
       registered: !!reg,
@@ -240,34 +226,22 @@ app.post('/api/register/confirm', async (req, res) => {
       return res.status(400).json({ error: 'No linked Usernode wallet to verify against.' });
     }
 
-    if (IS_STAGING) {
-      // No real chain/explorer transfer to verify in staging — register the
-      // calling user directly so the full transition is exercisable. Strictly
-      // a no-op outside staging; production always verifies on-chain below.
-      const txHash = 'staging-' + req.user.id;
-      await insertRegistration({
-        userId: req.user.id,
-        username: req.user.username,
-        pubkey,
-        txHash,
-        memo: JSON.stringify({ app: APP_NAMESPACE, action: REGISTER_ACTION }),
-        amount: 1,
-      });
-    } else {
-      const txHash = (req.body && req.body.tx_hash) || null;
-      const matched = await verifyRegistrationTx(pubkey, txHash);
-      if (!matched) {
-        return res.status(422).json({ error: "Couldn't verify your registration transfer. Please try again." });
-      }
-      await insertRegistration({
-        userId: req.user.id,
-        username: req.user.username,
-        pubkey,
-        txHash: String(txId(matched)),
-        memo: typeof matched.memo === 'string' ? matched.memo : JSON.stringify(matched.memo),
-        amount: pick(matched, ['amount', 'value']) ?? 1,
-      });
+    // Verify the burn transfer on-chain — the same path in staging and
+    // production. Staging exercises the real bridge send + explorer
+    // verification; nothing is granted without a matching on-chain transfer.
+    const txHash = (req.body && req.body.tx_hash) || null;
+    const matched = await verifyRegistrationTx(pubkey, txHash);
+    if (!matched) {
+      return res.status(422).json({ error: "Couldn't verify your registration transfer. Please try again." });
     }
+    await insertRegistration({
+      userId: req.user.id,
+      username: req.user.username,
+      pubkey,
+      txHash: String(txId(matched)),
+      memo: typeof matched.memo === 'string' ? matched.memo : JSON.stringify(matched.memo),
+      amount: pick(matched, ['amount', 'value']) ?? 1,
+    });
 
     const reg = await getRegistration(req.user.id);
     res.json({
