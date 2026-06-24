@@ -1,3 +1,30 @@
 {
-  "secrets": []
+  "name": "Crypto Predictions",
+  "secrets": [
+    {
+      "key": "EXPLORER_UPSTREAM",
+      "description": "Base URL of the public block explorer the /explorer-api proxy forwards to. Defaults to the platform's hosted explorer if unset.",
+      "required": false,
+      "private": false,
+      "default": "https://social-vibecoding.usernodelabs.org/explorer-api"
+    }
+  ],
+  "tests": [
+    {
+      "name": "Registration screen loads",
+      "path": "/",
+      "expectSelector": "#card"
+    },
+    {
+      "name": "Registered state renders",
+      "path": "/?demo=1",
+      "expectText": "1,000"
+    },
+    {
+      "name": "Health check",
+      "path": "/health",
+      "expectText": "ok",
+      "allowConsoleErrors": true
+    }
+  ]
 }

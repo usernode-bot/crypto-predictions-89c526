@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
+
   <script>
   // usernode-dev-console@1
   (function () {
@@ -66,56 +66,147 @@
   <title>Crypto Predictions</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
+  <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center justify-center gap-8 p-4">
-  <h1 class="text-2xl font-bold">Crypto Predictions</h1>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center justify-center gap-6 p-4">
 
-  <button id="press-btn" class="w-32 h-32 rounded-full bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-violet-600/30">
-    Press!
-  </button>
+  <span id="staging-badge" class="hidden fixed top-3 right-3 text-xs font-semibold uppercase tracking-wide bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded">Staging</span>
 
-  <div id="count" class="text-lg text-zinc-400">0 total presses</div>
+  <div class="text-center">
+    <h1 class="text-2xl font-bold">Crypto Predictions</h1>
+    <p class="text-sm text-zinc-500 mt-1">Trade 15-minute crypto predictions with platform tokens.</p>
+  </div>
 
-  <div class="w-full max-w-sm">
-    <h2 class="text-sm font-medium text-zinc-500 mb-2 text-center">Leaderboard</h2>
-    <div id="leaderboard" class="space-y-1"></div>
+  <div id="card" class="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-lg">
+    <div id="loading" class="text-center text-zinc-500 text-sm py-8">Loading…</div>
   </div>
 
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
+    const demo = params.get('demo') === '1';
     const headers = token ? { 'x-usernode-token': token } : {};
 
-    async function loadLeaderboard() {
-      const res = await fetch('/api/leaderboard', { headers });
-      if (!res.ok) return;
-      const { leaderboard } = await res.json();
-      const el = document.getElementById('leaderboard');
-      if (!leaderboard.length) {
-        el.innerHTML = '<p class="text-center text-zinc-600 text-sm">No presses yet</p>';
-        return;
-      }
-      el.innerHTML = leaderboard.map((r, i) =>
-        '<div class="flex justify-between px-3 py-1 rounded ' + (i === 0 ? 'bg-violet-600/20 text-violet-300' : 'text-zinc-400') + '">' +
-        '<span>' + (i + 1) + '. ' + r.username + '</span>' +
-        '<span class="font-mono">' + r.presses + '</span></div>'
-      ).join('');
-      const total = leaderboard.reduce((s, r) => s + parseInt(r.presses), 0);
-      document.getElementById('count').textContent = total + ' total presses';
+    const card = document.getElementById('card');
+    const REGISTER_MEMO = JSON.stringify({ app: 'binier/crypto_predictions', action: 'register' });
+
+    function shortAddr(a) {
+      if (!a) return '';
+      return a.length > 16 ? a.slice(0, 10) + '…' + a.slice(-6) : a;
     }
 
-    document.getElementById('press-btn').addEventListener('click', async () => {
+    function extractTxId(result) {
+      if (!result) return null;
+      if (typeof result === 'string') return result;
+      const keys = ['tx_id', 'txid', 'txId', 'hash', 'tx_hash', 'txHash', 'id'];
+      for (const k of keys) if (result[k] != null) return String(result[k]);
+      if (result.tx) return extractTxId(result.tx);
+      return null;
+    }
+
+    function renderNoWallet() {
+      card.innerHTML =
+        '<h2 class="text-lg font-semibold text-center mb-2">Link a wallet to register</h2>' +
+        '<p class="text-sm text-zinc-400 text-center">Registration requires a linked Usernode wallet to verify your on-chain transfer. Link a wallet in Usernode, then come back.</p>';
+    }
+
+    function renderRegistered(state) {
+      card.innerHTML =
+        '<div class="text-center">' +
+        '<div class="text-3xl mb-2">✓</div>' +
+        '<h2 class="text-lg font-semibold">You\'re registered</h2>' +
+        '<p class="text-sm text-zinc-500 mt-1">Welcome aboard, ' + (state.username || 'trader') + '.</p>' +
+        '<div class="mt-5 bg-zinc-950 border border-zinc-800 rounded-xl p-4">' +
+        '<div class="text-xs uppercase tracking-wide text-zinc-500">Balance</div>' +
+        '<div class="text-3xl font-bold text-violet-300 mt-1">' + Number(state.balance).toLocaleString('en-US') + '</div>' +
+        '<div class="text-xs text-zinc-500">platform tokens</div>' +
+        '</div>' +
+        '<div class="mt-3 text-xs text-zinc-600 font-mono">' + shortAddr(state.usernode_pubkey) + '</div>' +
+        '<p class="mt-4 text-sm text-zinc-500">Trading is coming soon.</p>' +
+        '</div>';
+    }
+
+    function renderUnregistered(state) {
+      card.innerHTML =
+        '<h2 class="text-lg font-semibold text-center">Register to start trading</h2>' +
+        '<p class="text-sm text-zinc-400 text-center mt-2">Registering burns <span class="text-zinc-200 font-medium">1 Usernode token</span> and credits you <span class="text-zinc-200 font-medium">1,000 platform tokens</span> to trade with.</p>' +
+        '<div class="mt-4 text-xs text-zinc-600 text-center font-mono">' + shortAddr(state.usernode_pubkey) + '</div>' +
+        '<button id="register-btn" class="mt-5 w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white font-semibold">Register</button>' +
+        '<p id="register-status" class="mt-3 text-center text-sm text-zinc-500 min-h-[1.25rem]"></p>';
+      document.getElementById('register-btn').addEventListener('click', () => register(state));
+    }
+
+    function render(state) {
+      document.getElementById('staging-badge').classList.toggle('hidden', !state.staging);
+      if (state.registered) return renderRegistered(state);
+      if (!state.usernode_pubkey) return renderNoWallet();
+      return renderUnregistered(state);
+    }
+
+    function setStatus(msg, isError) {
+      const el = document.getElementById('register-status');
+      if (el) el.innerHTML = '<span class="' + (isError ? 'text-red-400' : 'text-zinc-400') + '">' + msg + '</span>';
+    }
+
+    function setBtnDisabled(disabled, label) {
+      const btn = document.getElementById('register-btn');
+      if (!btn) return;
+      btn.disabled = disabled;
+      btn.classList.toggle('opacity-50', disabled);
+      btn.classList.toggle('cursor-not-allowed', disabled);
+      if (label) btn.textContent = label;
+    }
+
+    async function register(state) {
+      setBtnDisabled(true, 'Sending…');
+      setStatus('Opening your wallet…');
+      let txHash = null;
       try {
-        const res = await fetch('/api/press', {
+        if (window.usernode && typeof window.usernode.sendTransaction === 'function') {
+          const result = await window.usernode.sendTransaction(state.burnAddress, 1, REGISTER_MEMO);
+          txHash = extractTxId(result);
+        }
+        // In staging there may be no real bridge/chain; the backend registers
+        // without an on-chain proof, so a missing txHash is fine there.
+        setStatus('Waiting for confirmation…');
+        setBtnDisabled(true, 'Confirming…');
+        const res = await fetch('/api/register/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({ tx_hash: txHash }),
         });
-        if (res.ok) loadLeaderboard();
-        else if (res.status === 401) document.getElementById('count').textContent = 'Sign in to press!';
-      } catch {}
-    });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setStatus(body.error || "Couldn't confirm registration. Please try again.", true);
+          setBtnDisabled(false, 'Register');
+          return;
+        }
+        const next = await res.json();
+        render(next);
+      } catch (err) {
+        // User cancelled the wallet prompt or the send failed — return to the
+        // register state without charging anything. Use a friendly message,
+        // not a console error (the dapp.json tests fail on console errors).
+        setStatus('Registration cancelled. You can try again.', true);
+        setBtnDisabled(false, 'Register');
+      }
+    }
 
-    loadLeaderboard();
+    async function load() {
+      try {
+        const res = await fetch('/api/me' + (demo ? '?demo=1' : ''), { headers });
+        if (!res.ok) {
+          card.innerHTML = '<p class="text-center text-zinc-500 text-sm py-6">Sign in through Usernode to register.</p>';
+          return;
+        }
+        const state = await res.json();
+        render(state);
+      } catch (err) {
+        card.innerHTML = '<p class="text-center text-zinc-500 text-sm py-6">Couldn\'t load your status. Please reload.</p>';
+      }
+    }
+
+    load();
   </script>
 </body>
 </html>
