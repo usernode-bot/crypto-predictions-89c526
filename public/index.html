@@ -236,9 +236,18 @@
       setDetail('');
 
       // --- Send phase: burn 1 token to the burn address with the memo. ---
+      // Prefer the bridge's window.usernode.sendTransaction; fall back to a
+      // top-level window.sendTransaction if that's what the host exposes. No
+      // pre-call guard — if neither is callable the call throws and the catch
+      // below classifies it like any other send failure.
       let txHash = null;
       try {
-        const result = await window.usernode.sendTransaction(state.burnAddress, 1, REGISTER_MEMO);
+        // Invoke in place (not via a detached reference) so the bridge method
+        // keeps its `this === window.usernode` receiver.
+        const useBridge = window.usernode && typeof window.usernode.sendTransaction === 'function';
+        const result = useBridge
+          ? await window.usernode.sendTransaction(state.burnAddress, 1, REGISTER_MEMO)
+          : await window.sendTransaction(state.burnAddress, 1, REGISTER_MEMO);
         txHash = extractTxId(result);
         lastTxHash = txHash;
       } catch (err) {
