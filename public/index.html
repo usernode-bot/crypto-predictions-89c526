@@ -125,14 +125,19 @@
         '</div>';
     }
 
+    // Remembers the last tx id we saw so the Verify-only recovery path can
+    // re-check the same burn without sending a second transfer.
+    let lastTxHash = null;
+
     function renderUnregistered(state) {
       card.innerHTML =
         '<h2 class="text-lg font-semibold text-center">Register to start trading</h2>' +
         '<p class="text-sm text-zinc-400 text-center mt-2">Registering burns <span class="text-zinc-200 font-medium">1 Usernode token</span> and credits you <span class="text-zinc-200 font-medium">1,000 platform tokens</span> to trade with.</p>' +
         '<div class="mt-4 text-xs text-zinc-600 text-center font-mono">' + shortAddr(state.usernode_pubkey) + '</div>' +
         '<button id="register-btn" class="mt-5 w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white font-semibold">Register</button>' +
-        '<p id="register-status" class="mt-3 text-center text-sm text-zinc-500 min-h-[1.25rem]"></p>';
-      document.getElementById('register-btn').addEventListener('click', () => register(state));
+        '<p id="register-status" class="mt-3 text-center text-sm text-zinc-500 min-h-[1.25rem]"></p>' +
+        '<p id="register-detail" class="mt-1 text-center text-xs text-zinc-600 font-mono break-words"></p>';
+      setAction('Register', () => register(state));
     }
 
     function render(state) {
@@ -144,7 +149,15 @@
 
     function setStatus(msg, isError) {
       const el = document.getElementById('register-status');
-      if (el) el.innerHTML = '<span class="' + (isError ? 'text-red-400' : 'text-zinc-400') + '">' + msg + '</span>';
+      if (el) el.innerHTML = '<span class="' + (isError ? 'text-red-400' : 'text-zinc-400') + '"></span>';
+      if (el && el.firstChild) el.firstChild.textContent = msg;
+    }
+
+    // The muted secondary line carrying the raw underlying reason, so a user
+    // can report exactly what went wrong. Uses textContent — never HTML.
+    function setDetail(text) {
+      const el = document.getElementById('register-detail');
+      if (el) el.textContent = text || '';
     }
 
     function setBtnDisabled(disabled, label) {
@@ -156,44 +169,112 @@
       if (label) btn.textContent = label;
     }
 
+    // Re-enable the action button with a given label and click handler.
+    function setAction(label, handler) {
+      const btn = document.getElementById('register-btn');
+      if (!btn) return;
+      btn.disabled = false;
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+      btn.textContent = label;
+      btn.onclick = handler;
+    }
+
+    // Render a failure: friendly headline + muted reason line, and offer the
+    // correct recovery. recovery === 'verify' shows "Verify registration"
+    // (re-checks the chain, never re-sends) for cases where a transfer may
+    // already be on-chain; otherwise "Register" (safe — nothing was sent).
+    function showFailure(headline, detail, recovery, state) {
+      setStatus(headline, true);
+      setDetail(detail || '');
+      if (recovery === 'verify') {
+        setAction('Verify registration', () => verify(state));
+      } else {
+        setAction('Register', () => register(state));
+      }
+    }
+
+    // POST the confirm step (shared by the Register flow's confirm phase and
+    // the Verify-only recovery). Never calls sendTransaction.
+    async function confirmRegistration(state, txHash) {
+      let res;
+      try {
+        res = await fetch('/api/register/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({ tx_hash: txHash }),
+        });
+      } catch (err) {
+        console.error('[register]', 'confirm', err);
+        showFailure(
+          'Your transfer went through, but we couldn\'t reach the server to finish. Use "Verify registration" to retry.',
+          err && err.message ? err.message : String(err),
+          'verify', state);
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error('[register]', 'confirm', res.status, body && body.error);
+        showFailure(
+          body.error || "We couldn't verify your registration transfer yet.",
+          'HTTP ' + res.status + (body && body.error ? ' — ' + body.error : ''),
+          'verify', state);
+        return;
+      }
+      const next = await res.json();
+      render(next);
+    }
+
     async function register(state) {
       // No pre-call guard on window.usernode.sendTransaction: the bridge
       // assigns it synchronously, but a name check fires false-negatives in
       // some iframe contexts (relay handshake). The State 3 no-wallet case is
       // already gated upstream (the button only renders when usernode_pubkey
-      // is present). Any real failure — bridge missing, send rejected, user
-      // cancelled — is caught by the try/catch below.
+      // is present). Send and confirm are separate phases so a confirm-step
+      // network error is never mislabeled as a wallet cancellation.
       setBtnDisabled(true, 'Sending…');
       setStatus('Opening your wallet…');
+      setDetail('');
+
+      // --- Send phase: burn 1 token to the burn address with the memo. ---
       let txHash = null;
       try {
-        // Burn 1 Usernode token to the burn address with the register memo.
-        // The bridge polls /explorer-api for inclusion and resolves with the tx.
         const result = await window.usernode.sendTransaction(state.burnAddress, 1, REGISTER_MEMO);
         txHash = extractTxId(result);
-        // The backend re-verifies this transfer on-chain before granting tokens.
-        setStatus('Waiting for confirmation…');
-        setBtnDisabled(true, 'Confirming…');
-        const res = await fetch('/api/register/confirm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({ tx_hash: txHash }),
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          setStatus(body.error || "Couldn't confirm registration. Please try again.", true);
-          setBtnDisabled(false, 'Register');
-          return;
-        }
-        const next = await res.json();
-        render(next);
+        lastTxHash = txHash;
       } catch (err) {
-        // User cancelled the wallet prompt or the send failed — return to the
-        // register state without charging anything. Use a friendly message,
-        // not a console error (the dapp.json tests fail on console errors).
-        setStatus('Registration cancelled. You can try again.', true);
-        setBtnDisabled(false, 'Register');
+        console.error('[register]', 'send', err);
+        const msg = (err && err.message ? err.message : String(err)).toLowerCase();
+        const detail = err && err.message ? err.message : String(err);
+        if (/cancel|reject|declin/.test(msg)) {
+          // Genuine user cancellation — nothing was sent, safe to retry.
+          showFailure('Registration cancelled — no tokens were sent. You can try again.', detail, 'register', state);
+        } else if (/not available|relay timed out/.test(msg)) {
+          // Wallet never reached — the transfer was never broadcast.
+          showFailure('Couldn\'t reach your Usernode wallet. Make sure you opened this app inside the Usernode app, then reload and try again.', detail, 'register', state);
+        } else if (/appear|waiting for transaction/.test(msg)) {
+          // Inclusion timed out — the burn may already be on-chain.
+          showFailure('Your transfer may have been sent. Don\'t send it again — use "Verify registration" to finish, or reload in a moment.', detail, 'verify', state);
+        } else {
+          // Unknown failure after the wallet was invoked — assume possibly
+          // sent and offer Verify, never a fresh Register (no double-burn).
+          showFailure('Your transfer may have been sent. Don\'t send it again — use "Verify registration" to finish.', detail, 'verify', state);
+        }
+        return;
       }
+
+      // --- Confirm phase: backend re-verifies the transfer on-chain. ---
+      setStatus('Waiting for confirmation…');
+      setBtnDisabled(true, 'Confirming…');
+      await confirmRegistration(state, txHash);
+    }
+
+    // Verify-only recovery: re-check the chain for an already-sent burn.
+    // Reuses the last known tx id (or null) and never calls sendTransaction.
+    async function verify(state) {
+      setBtnDisabled(true, 'Verifying…');
+      setStatus('Verifying your registration…');
+      setDetail('');
+      await confirmRegistration(state, lastTxHash);
     }
 
     async function load() {
