@@ -157,13 +157,12 @@
     }
 
     async function register(state) {
-      if (!window.usernode || typeof window.usernode.sendTransaction !== 'function') {
-        // No bridge available — the backend verifies the transfer on-chain
-        // (staging and production alike), so without the wallet bridge there's
-        // no way to send the burn. Surface a clear message instead of POSTing.
-        setStatus('Wallet bridge unavailable — open this app inside Usernode to register.', true);
-        return;
-      }
+      // No pre-call guard on window.usernode.sendTransaction: the bridge
+      // assigns it synchronously, but a name check fires false-negatives in
+      // some iframe contexts (relay handshake). The State 3 no-wallet case is
+      // already gated upstream (the button only renders when usernode_pubkey
+      // is present). Any real failure — bridge missing, send rejected, user
+      // cancelled — is caught by the try/catch below.
       setBtnDisabled(true, 'Sending…');
       setStatus('Opening your wallet…');
       let txHash = null;
