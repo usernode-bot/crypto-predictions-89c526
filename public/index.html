@@ -86,6 +86,13 @@
     const token = params.get('token') || '';
     const headers = token ? { 'x-usernode-token': token } : {};
 
+    // Point the bridge's post-send inclusion poller at our own same-origin
+    // /explorer-api proxy (the iframe has no platform token to reach the
+    // explorer directly). Relative path, no trailing slash — the bridge
+    // appends its own sub-path. Guarded: the bridge installs window.usernode
+    // synchronously, but never assume it's present.
+    if (window.usernode) window.usernode.transactionsBaseUrl = '/explorer-api';
+
     const card = document.getElementById('card');
     const REGISTER_MEMO = JSON.stringify({ app: 'binier/crypto_predictions', action: 'register' });
 
@@ -242,6 +249,9 @@
       // below classifies it like any other send failure.
       let txHash = null;
       try {
+        // Re-assert the inclusion-poll base right before sending: the relay
+        // handshake can replace window.usernode after initial load.
+        if (window.usernode) window.usernode.transactionsBaseUrl = '/explorer-api';
         // Invoke in place (not via a detached reference) so the bridge method
         // keeps its `this === window.usernode` receiver.
         const useBridge = window.usernode && typeof window.usernode.sendTransaction === 'function';
