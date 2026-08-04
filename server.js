@@ -41,11 +41,17 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // Button press
 app.post('/api/press', async (req, res) => {
+  const increment = req.body?.increment ?? 1;
+  if (increment !== 1 && increment !== 4) {
+    return res.status(400).json({ error: 'Increment must be 1 or 4' });
+  }
+
   try {
     await pool.query(`
-      INSERT INTO presses (user_id, username) VALUES ($1, $2)
-    `, [req.user.id, req.user.username]);
-    res.json({ ok: true });
+      INSERT INTO presses (user_id, username)
+      SELECT $1, $2 FROM generate_series(1, $3::integer)
+    `, [req.user.id, req.user.username, increment]);
+    res.json({ ok: true, increment });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -70,9 +70,14 @@
 <body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center justify-center gap-8 p-4">
   <h1 class="text-2xl font-bold">Crypto Predictions</h1>
 
-  <button id="press-btn" class="w-32 h-32 rounded-full bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-violet-600/30">
-    Press!
-  </button>
+  <div class="flex items-center justify-center gap-4">
+    <button data-increment="1" class="w-32 h-32 rounded-full bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-violet-600/30">
+      Press!
+    </button>
+    <button data-increment="4" class="w-32 h-32 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-indigo-600/30">
+      Press x4!
+    </button>
+  </div>
 
   <div id="count" class="text-lg text-zinc-400">0 total presses</div>
 
@@ -104,15 +109,18 @@
       document.getElementById('count').textContent = total + ' total presses';
     }
 
-    document.getElementById('press-btn').addEventListener('click', async () => {
-      try {
-        const res = await fetch('/api/press', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...headers },
-        });
-        if (res.ok) loadLeaderboard();
-        else if (res.status === 401) document.getElementById('count').textContent = 'Sign in to press!';
-      } catch {}
+    document.querySelectorAll('[data-increment]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/press', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ increment: Number(button.dataset.increment) }),
+          });
+          if (res.ok) loadLeaderboard();
+          else if (res.status === 401) document.getElementById('count').textContent = 'Sign in to press!';
+        } catch {}
+      });
     });
 
     loadLeaderboard();
