@@ -6,6 +6,12 @@
       "path": "/",
       "expectSelector": "button[data-increment=\"4\"].bg-green-800",
       "allowConsoleErrors": true
+    },
+    {
+      "name": "Single press button has half the x4 button diameter",
+      "path": "/",
+      "expectSelector": "button[data-increment=\"1\"].w-16.h-16",
+      "allowConsoleErrors": true
     }
   ]
 }
