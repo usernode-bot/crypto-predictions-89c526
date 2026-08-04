@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const { normalizePressCount } = require('./press-count');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -41,11 +42,17 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // Button press
 app.post('/api/press', async (req, res) => {
+  const pressCount = normalizePressCount(req.body?.count);
+  if (pressCount === null) {
+    return res.status(400).json({ error: 'count must be 1 or 2' });
+  }
+
   try {
     await pool.query(`
-      INSERT INTO presses (user_id, username) VALUES ($1, $2)
-    `, [req.user.id, req.user.username]);
-    res.json({ ok: true });
+      INSERT INTO presses (user_id, username)
+      SELECT $1, $2 FROM generate_series(1, $3::integer)
+    `, [req.user.id, req.user.username, pressCount]);
+    res.json({ ok: true, pressesAdded: pressCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
