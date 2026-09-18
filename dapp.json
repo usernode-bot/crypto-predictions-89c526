@@ -1,3 +1,14 @@
 {
-  "secrets": []
+  "secrets": [],
+  "tests": [
+    {
+      "id": "footer.attribution",
+      "name": "Footer shows attribution text",
+      "path": "/",
+      "expectSelector": "#app-footer",
+      "expectText": "created from gpt mobile work",
+      "visual": true,
+      "impact": ["public/**"]
+    }
+  ]
 }
