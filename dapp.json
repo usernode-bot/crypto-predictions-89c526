@@ -1,3 +1,14 @@
 {
-  "secrets": []
+  "secrets": [],
+  "tests": [
+    {
+      "id": "home.footer",
+      "name": "Home page shows mobile work footer",
+      "path": "/",
+      "expectSelector": "footer",
+      "expectText": "created from gpt mobile work",
+      "visual": true,
+      "impact": ["public/index.html"]
+    }
+  ]
 }
